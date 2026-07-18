@@ -51,6 +51,10 @@ contract PaymentRequests is ReentrancyGuard {
     uint256 public requestCount;
     mapping(uint256 => Request) internal _requests;
 
+    /// @notice Every request id a requester has created, in creation order, so a
+    ///         wallet can list its own request links without scanning events.
+    mapping(address => uint256[]) internal _requestsByRequester;
+
     event PaymentRequestCreated(
         uint256 indexed requestId,
         address indexed requester,
@@ -108,6 +112,7 @@ contract PaymentRequests is ReentrancyGuard {
             expiresAt: expiresAt,
             exists: true
         });
+        _requestsByRequester[msg.sender].push(requestId);
 
         emit PaymentRequestCreated(
             requestId,
@@ -160,5 +165,24 @@ contract PaymentRequests is ReentrancyGuard {
 
     function getRequest(uint256 requestId) external view returns (Request memory) {
         return _requests[requestId];
+    }
+
+    /// @notice Number of requests a wallet has created.
+    function requestCountOf(address requester) external view returns (uint256) {
+        return _requestsByRequester[requester].length;
+    }
+
+    /// @notice The request ids a wallet has created, oldest first. Pair with
+    ///         {getRequest} to render a wallet's outstanding request links.
+    function requestIdsOf(address requester) external view returns (uint256[] memory) {
+        return _requestsByRequester[requester];
+    }
+
+    /// @notice Whether a request can still be paid right now: it exists, is open,
+    ///         and has not expired. A convenience for clients so they need not
+    ///         re-derive the {fulfill} preconditions before rendering a pay link.
+    function isFulfillable(uint256 requestId) external view returns (bool) {
+        Request storage r = _requests[requestId];
+        return r.exists && r.status == RequestStatus.Open && block.timestamp < r.expiresAt;
     }
 }
