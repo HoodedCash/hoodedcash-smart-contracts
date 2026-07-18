@@ -31,6 +31,9 @@ import "./libraries/HoodedErrors.sol";
 contract AgentManager is ReentrancyGuard {
     using SafeTransferLib for IERC20;
 
+    /// @notice Raised when a signer rotation names the key the agent already uses.
+    error SameSigner();
+
     /// @notice How much latitude an agent has before a human is involved.
     enum AutonomyTier {
         /// Every spend is queued for approval regardless of amount.
@@ -118,6 +121,12 @@ contract AgentManager is ReentrancyGuard {
         uint256 timestamp
     );
     event AgentStatusChanged(uint256 indexed agentId, AgentStatus status, uint256 timestamp);
+    event AgentSignerRotated(
+        uint256 indexed agentId,
+        address indexed previousSigner,
+        address indexed newSigner,
+        uint256 timestamp
+    );
     event AgentFunded(
         uint256 indexed agentId, address indexed funder, uint256 amount, uint256 timestamp
     );
@@ -280,6 +289,27 @@ contract AgentManager is ReentrancyGuard {
 
         a.status = status;
         emit AgentStatusChanged(agentId, status, block.timestamp);
+    }
+
+    /// @notice Rotates the key the agent submits spends with, keeping the vault,
+    ///         policy, and spend history intact.
+    /// @dev The recovery path for a leaked agent key that stops short of
+    ///      {revokeAgent}: pause the agent, point it at a freshly generated
+    ///      signer, and resume, rather than tearing the agent down and rebuilding
+    ///      it. Only the owning profile can rotate; the agent cannot re-key
+    ///      itself. A revoked agent stays revoked.
+    function rotateAgentSigner(uint256 agentId, address newSigner)
+        external
+        onlyAgentOwner(agentId)
+    {
+        if (newSigner == address(0)) revert ZeroAddress();
+        Agent storage a = _agents[agentId];
+        if (a.status == AgentStatus.Revoked) revert AgentAlreadyRevoked();
+        if (a.agentSigner == newSigner) revert SameSigner();
+
+        address previous = a.agentSigner;
+        a.agentSigner = newSigner;
+        emit AgentSignerRotated(agentId, previous, newSigner, block.timestamp);
     }
 
     /// @notice Permanently revokes an agent and sweeps its remaining vault
