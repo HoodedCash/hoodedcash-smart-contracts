@@ -36,6 +36,10 @@ contract ConfidentialToken is ReentrancyGuard {
     using SafeTransferLib for IERC20;
     using AltBn128 for AltBn128.Point;
 
+    /// @notice Raised when a wrap, unwrap, or transfer is attempted while the
+    ///         token is paused.
+    error TokenPaused();
+
     struct Ciphertext {
         AltBn128.Point c1;
         AltBn128.Point c2;
@@ -61,14 +65,27 @@ contract ConfidentialToken is ReentrancyGuard {
     ///         fully collateralised.
     uint256 public totalWrapped;
 
+    /// @notice Circuit breaker for the confidential layer. When true, value stops
+    ///         moving — deposits, withdrawals, and transfers all revert — while
+    ///         registration and verifier rotation keep working, so the authority
+    ///         can freeze the pool during an incident (a suspect verifier, a
+    ///         base-asset problem) without stranding accounts.
+    bool public paused;
+
     event Registered(address indexed account, uint256 pkX, uint256 pkY);
     event Deposited(address indexed account, uint256 amount);
     event ConfidentialTransfer(address indexed from, address indexed to);
     event Withdrawn(address indexed account, uint256 amount);
     event VerifierUpdated(address indexed verifier);
+    event PauseToggled(bool paused);
 
     modifier onlyAuthority() {
         if (msg.sender != authority) revert Unauthorized();
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (paused) revert TokenPaused();
         _;
     }
 
@@ -104,7 +121,7 @@ contract ConfidentialToken is ReentrancyGuard {
     ///         balance. Adds `amount * G` to the message component with zero
     ///         randomness, so the running balance stays decryptable by the
     ///         caller's own view key.
-    function deposit(uint256 amount) external nonReentrant {
+    function deposit(uint256 amount) external nonReentrant whenNotPaused {
         if (!registered[msg.sender]) revert AccountNotRegistered();
         if (amount == 0) revert InvalidSpendAmount();
 
@@ -130,6 +147,7 @@ contract ConfidentialToken is ReentrancyGuard {
     function withdraw(uint256 amount, bytes calldata proof, uint256[] calldata publicSignals)
         external
         nonReentrant
+        whenNotPaused
     {
         if (!registered[msg.sender]) revert AccountNotRegistered();
         if (amount == 0) revert InvalidSpendAmount();
@@ -161,7 +179,7 @@ contract ConfidentialToken is ReentrancyGuard {
         Ciphertext calldata recipientDelta,
         bytes calldata proof,
         uint256[] calldata publicSignals
-    ) external nonReentrant {
+    ) external nonReentrant whenNotPaused {
         if (!registered[msg.sender]) revert AccountNotRegistered();
         if (!registered[to]) revert AccountNotRegistered();
         if (to == msg.sender) revert Unauthorized();
@@ -185,6 +203,14 @@ contract ConfidentialToken is ReentrancyGuard {
         if (address(newVerifier) == address(0)) revert ZeroAddress();
         verifier = newVerifier;
         emit VerifierUpdated(address(newVerifier));
+    }
+
+    /// @notice Freezes or unfreezes value movement on the confidential layer.
+    ///         Registration and verifier rotation are intentionally left working
+    ///         so the pool can be recovered without a redeploy.
+    function setPaused(bool paused_) external onlyAuthority {
+        paused = paused_;
+        emit PauseToggled(paused_);
     }
 
     /// @notice Transfers the verifier-management authority.
