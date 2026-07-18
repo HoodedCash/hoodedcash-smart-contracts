@@ -33,6 +33,11 @@ contract DisclosureRegistry {
     uint256 public receiptCount;
     mapping(uint256 => DisclosureReceipt) internal _receipts;
 
+    /// @notice Every receipt id a profile has filed, in filing order. An audit
+    ///         export walks this to gather a profile's disclosures without
+    ///         replaying the whole {DisclosureFiled} event log.
+    mapping(address => uint256[]) internal _receiptsByProfile;
+
     event DisclosureFiled(
         uint256 indexed receiptId, address indexed profile, string txReference, uint256 timestamp
     );
@@ -68,11 +73,23 @@ contract DisclosureRegistry {
             filedAt: uint64(block.timestamp),
             exists: true
         });
+        _receiptsByProfile[msg.sender].push(receiptId);
 
         emit DisclosureFiled(receiptId, msg.sender, txReference, block.timestamp);
     }
 
     function getReceipt(uint256 receiptId) external view returns (DisclosureReceipt memory) {
         return _receipts[receiptId];
+    }
+
+    /// @notice Number of disclosure receipts a profile has filed.
+    function receiptCountOf(address profile) external view returns (uint256) {
+        return _receiptsByProfile[profile].length;
+    }
+
+    /// @notice The receipt ids a profile has filed, oldest first. Pair with
+    ///         {getReceipt} to hydrate each record for an audit export.
+    function receiptIdsOf(address profile) external view returns (uint256[] memory) {
+        return _receiptsByProfile[profile];
     }
 }
