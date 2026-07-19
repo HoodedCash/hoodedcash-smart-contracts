@@ -10,6 +10,8 @@ import {DisclosureRegistry} from "../src/DisclosureRegistry.sol";
 import {ConfidentialToken} from "../src/confidential/ConfidentialToken.sol";
 import {MockTransferVerifier} from "../src/confidential/MockTransferVerifier.sol";
 import {IConfidentialTransferVerifier} from "../src/confidential/IConfidentialTransferVerifier.sol";
+import {HoodedStaking} from "../src/fees/HoodedStaking.sol";
+import {FeeController} from "../src/fees/FeeController.sol";
 import {IProtocolConfig} from "../src/interfaces/IProtocolConfig.sol";
 import {IHoodedRegistry} from "../src/interfaces/IHoodedRegistry.sol";
 import {IERC20} from "../src/interfaces/IERC20.sol";
@@ -52,6 +54,20 @@ contract Deploy is Script {
             IERC20(usdg), IConfidentialTransferVerifier(verifierAddr), msg.sender
         );
 
+        // $HOODED fee model. Deploys the staking vault and the fee controller
+        // against the existing $HOODED token, then wires them into the config so
+        // holding and staking $HOODED lowers what an account pays. Skipped, with
+        // fees left off, when HOODED_ADDRESS or TREASURY is not set.
+        address hooded = vm.envOr("HOODED_ADDRESS", address(0));
+        address treasury = vm.envOr("TREASURY", address(0));
+        HoodedStaking staking;
+        FeeController feeController;
+        if (hooded != address(0) && treasury != address(0)) {
+            staking = new HoodedStaking(IERC20(hooded));
+            feeController = new FeeController(msg.sender, IERC20(hooded), staking);
+            config.setFeeConfig(treasury, address(feeController));
+        }
+
         vm.stopBroadcast();
 
         console2.log("ProtocolConfig:     ", address(config));
@@ -61,5 +77,7 @@ contract Deploy is Script {
         console2.log("DisclosureRegistry: ", address(disclosures));
         console2.log("ConfidentialToken:  ", address(confidential));
         console2.log("TransferVerifier:   ", verifierAddr);
+        console2.log("HoodedStaking:      ", address(staking));
+        console2.log("FeeController:      ", address(feeController));
     }
 }

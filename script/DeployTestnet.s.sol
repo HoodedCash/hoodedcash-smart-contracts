@@ -42,10 +42,10 @@ contract DeployTestnet is Script {
         HoodedRegistry registry = new HoodedRegistry(IProtocolConfig(address(config)));
         AgentManager agents =
             new AgentManager(IProtocolConfig(address(config)), IHoodedRegistry(address(registry)));
-        PaymentRequests requests =
-            new PaymentRequests(IProtocolConfig(address(config)), IHoodedRegistry(address(registry)));
-        DisclosureRegistry disclosures =
-            new DisclosureRegistry(IHoodedRegistry(address(registry)));
+        PaymentRequests requests = new PaymentRequests(
+            IProtocolConfig(address(config)), IHoodedRegistry(address(registry))
+        );
+        DisclosureRegistry disclosures = new DisclosureRegistry(IHoodedRegistry(address(registry)));
 
         MockTransferVerifier verifier = new MockTransferVerifier();
         ConfidentialToken confidential = new ConfidentialToken(

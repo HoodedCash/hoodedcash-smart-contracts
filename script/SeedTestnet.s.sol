@@ -80,11 +80,19 @@ contract SeedTestnet is Script {
 
         // 5. gwen opens a request-to-pay for 25 USDG.
         uint256 reqId = requests.create(
-            gwen, address(usdg), false, 25 * USDG_ONE, bytes32(0), bytes32(0), uint64(block.timestamp + 7 days)
+            gwen,
+            address(usdg),
+            false,
+            25 * USDG_ONE,
+            bytes32(0),
+            bytes32(0),
+            uint64(block.timestamp + 7 days)
         );
 
         // 6. gwen files a selective-disclosure receipt for an auditor.
-        disclosures.file("rh-testnet-transfer-0001", keccak256("auditor:kpmg"), keccak256("proof:v1"));
+        disclosures.file(
+            "rh-testnet-transfer-0001", keccak256("auditor:kpmg"), keccak256("proof:v1")
+        );
 
         vm.stopBroadcast();
 
@@ -102,7 +110,9 @@ contract SeedTestnet is Script {
         // 9. agent settles a 4 USDG x402 invoice within policy (auto-settles).
         agents.payInvoice(agentId, VENDOR, 4 * USDG_ONE, bytes32("x402:inv-1001"));
         // 10. agent proposes a 9 USDG spend above the HITL threshold (queued).
-        agents.queueInvoice(agentId, VENDOR, 9 * USDG_ONE, bytes32("x402:inv-1002"), keccak256("memo:dataset"));
+        agents.queueInvoice(
+            agentId, VENDOR, 9 * USDG_ONE, bytes32("x402:inv-1002"), keccak256("memo:dataset")
+        );
         vm.stopBroadcast();
 
         // ── gwen: approve the queued agent spend ───────────────────────────────

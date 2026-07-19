@@ -55,3 +55,7 @@ error AccountNotRegistered();
 error AccountAlreadyRegistered();
 error InvalidPublicKey();
 error ProofRejected();
+
+// ── Fees / staking ──────────────────────────────────────────────────────────
+error InvalidFeeConfig();
+error InsufficientStakedBalance();

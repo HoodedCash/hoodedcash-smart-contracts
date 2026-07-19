@@ -35,6 +35,17 @@ An AI agent transacts with its own signing key, `agentSigner`, held by whatever 
 
 Funds never rest in the agent's own key, so a leaked agent key is neutralised by pausing or revoking the agent rather than racing to move money first.
 
+## Fees and the $HOODED discount
+
+Protocol fees are priced in one place, `FeeController`, which every fund-moving contract quotes against and which the app and SDK read to show a user their live rate. The model is "holding and staking $HOODED reduces what you pay": the more of the protocol an account is tied to, the less it is taxed for using it.
+
+- `quoteFee(payer, amount)` returns the fee due and the realised rate in basis points, after the payer's discount.
+- `discountBpsOf(account)` and `loyaltyWeightOf(account)` expose the discount and the weight behind it.
+
+The discount comes from a loyalty weight: $HOODED staked in `HoodedStaking` counts at full weight, $HOODED merely held counts at a reduced weight (`heldWeightBps`, default 50%), and that combined weight is matched against an ascending tier table. Defaults follow the published schedule (0.10% base fee, capped at 5 USDG) with tiers at 1k / 10k / 100k / 1M $HOODED giving 10% / 25% / 50% / 75% off.
+
+Fees are opt-in and routed through `ProtocolConfig.setFeeConfig(treasury, feeController)`. Until both a treasury and a controller are set, every path charges nothing and settles as a plain transfer, so wiring the model on is a deliberate, single-transaction switch. `AgentManager` charges the fee out of the agent vault (discounted by the owning profile's $HOODED) and `PaymentRequests` charges the payer on top of the amount, keeping the recipient whole.
+
 ## Trust model
 
 HoodedCash never holds user funds at the protocol level. A profile's assets stay in the user's own wallet. Only agent vaults are contract-controlled, and only to enforce the spend policy their owner configured. The emergency pause blocks fund movement while leaving identity and agent configuration working, so a user can always reconfigure or revoke an agent during an incident.

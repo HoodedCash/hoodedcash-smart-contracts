@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {IERC20} from "./interfaces/IERC20.sol";
 import {IProtocolConfig} from "./interfaces/IProtocolConfig.sol";
 import {IHoodedRegistry} from "./interfaces/IHoodedRegistry.sol";
+import {IFeeController} from "./fees/IFeeController.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 import {ReentrancyGuard} from "./libraries/ReentrancyGuard.sol";
 import "./libraries/HoodedErrors.sol";
@@ -157,6 +158,9 @@ contract AgentManager is ReentrancyGuard {
     );
     event PendingPaymentRejected(
         uint256 indexed agentId, uint256 indexed pendingId, uint256 timestamp
+    );
+    event ProtocolFeeCharged(
+        uint256 indexed agentId, address indexed treasury, uint256 fee, uint256 timestamp
     );
 
     constructor(IProtocolConfig config_, IHoodedRegistry registry_) {
@@ -376,14 +380,20 @@ contract AgentManager is ReentrancyGuard {
         _rollWindow(p);
         uint256 projected = p.windowSpent + amount;
         if (projected > p.dailyLimit) revert DailyLimitExceeded();
-        if (amount > vaultBalance[agentId]) revert InsufficientVaultBalance();
+
+        (uint256 fee, address treasury) = _quoteFee(agentId, amount);
+        if (amount + fee > vaultBalance[agentId]) revert InsufficientVaultBalance();
 
         // Effects before interaction.
         p.windowSpent = projected;
         p.updatedAt = uint64(block.timestamp);
-        vaultBalance[agentId] -= amount;
+        vaultBalance[agentId] -= amount + fee;
 
         IERC20(p.token).safeTransfer(recipient, amount);
+        if (fee > 0) {
+            IERC20(p.token).safeTransfer(treasury, fee);
+            emit ProtocolFeeCharged(agentId, treasury, fee, block.timestamp);
+        }
 
         emit AgentPaymentExecuted(
             agentId, recipient, p.token, amount, invoiceId, projected, block.timestamp
@@ -457,15 +467,21 @@ contract AgentManager is ReentrancyGuard {
         _rollWindow(p);
         uint256 projected = p.windowSpent + amount;
         if (projected > p.dailyLimit) revert DailyLimitExceeded();
-        if (amount > vaultBalance[agentId]) revert InsufficientVaultBalance();
+
+        (uint256 fee, address treasury) = _quoteFee(agentId, amount);
+        if (amount + fee > vaultBalance[agentId]) revert InsufficientVaultBalance();
 
         // Effects before interaction.
         p.windowSpent = projected;
         p.updatedAt = uint64(block.timestamp);
-        vaultBalance[agentId] -= amount;
+        vaultBalance[agentId] -= amount + fee;
         delete _pending[agentId][pendingId];
 
         IERC20(p.token).safeTransfer(recipient, amount);
+        if (fee > 0) {
+            IERC20(p.token).safeTransfer(treasury, fee);
+            emit ProtocolFeeCharged(agentId, treasury, fee, block.timestamp);
+        }
 
         emit AgentPaymentExecuted(
             agentId, recipient, p.token, amount, invoiceId, projected, block.timestamp
@@ -508,6 +524,24 @@ contract AgentManager is ReentrancyGuard {
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────
+
+    /// @dev Quotes the protocol fee for a spend, discounted by the agent owner's
+    ///      held and staked $HOODED. Returns zero (and no treasury) whenever fees
+    ///      are switched off, so an agent created before fees were wired keeps
+    ///      settling exactly as before. The fee is charged on top of the spend
+    ///      and paid out of the same vault; it does not count against the policy
+    ///      limits, which govern how much the agent spends, not what the protocol
+    ///      charges to move it.
+    function _quoteFee(uint256 agentId, uint256 amount)
+        internal
+        view
+        returns (uint256 fee, address treasury)
+    {
+        address fc = config.feeController();
+        treasury = config.treasury();
+        if (fc == address(0) || treasury == address(0)) return (0, address(0));
+        (fee,) = IFeeController(fc).quoteFee(_agents[agentId].ownerProfile, amount);
+    }
 
     function _validateLimits(
         uint256 perTxLimit,

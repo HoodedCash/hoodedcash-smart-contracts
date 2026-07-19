@@ -4,6 +4,7 @@ pragma solidity 0.8.24;
 import {IERC20} from "./interfaces/IERC20.sol";
 import {IProtocolConfig} from "./interfaces/IProtocolConfig.sol";
 import {IHoodedRegistry} from "./interfaces/IHoodedRegistry.sol";
+import {IFeeController} from "./fees/IFeeController.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 import {ReentrancyGuard} from "./libraries/ReentrancyGuard.sol";
 import "./libraries/HoodedErrors.sol";
@@ -68,6 +69,9 @@ contract PaymentRequests is ReentrancyGuard {
         uint256 indexed requestId, address indexed payer, uint256 amount, uint256 timestamp
     );
     event PaymentRequestCancelled(uint256 indexed requestId, uint256 timestamp);
+    event ProtocolFeeCharged(
+        uint256 indexed requestId, address indexed treasury, uint256 fee, uint256 timestamp
+    );
 
     constructor(IProtocolConfig config_, IHoodedRegistry registry_) {
         if (address(config_) == address(0) || address(registry_) == address(0)) {
@@ -148,9 +152,34 @@ contract PaymentRequests is ReentrancyGuard {
         }
 
         r.status = RequestStatus.Fulfilled;
+
+        // The payer is the one using the protocol, so the fee is charged to them
+        // on top of the amount and the recipient is kept whole. The payer's held
+        // and staked $HOODED set their discount. Fees stay off until the config
+        // is wired, in which case fee is zero and this is a plain transfer.
+        (uint256 fee, address treasury) = _quoteFee(msg.sender, amount);
+
         IERC20(r.token).safeTransferFrom(msg.sender, r.receiver, amount);
+        if (fee > 0) {
+            IERC20(r.token).safeTransferFrom(msg.sender, treasury, fee);
+            emit ProtocolFeeCharged(requestId, treasury, fee, block.timestamp);
+        }
 
         emit PaymentRequestFulfilled(requestId, msg.sender, amount, block.timestamp);
+    }
+
+    /// @dev Quotes the protocol fee for a fulfillment, discounted by the payer's
+    ///      held and staked $HOODED. Returns zero (and no treasury) whenever fees
+    ///      are switched off protocol wide.
+    function _quoteFee(address payer, uint256 amount)
+        internal
+        view
+        returns (uint256 fee, address treasury)
+    {
+        address fc = config.feeController();
+        treasury = config.treasury();
+        if (fc == address(0) || treasury == address(0)) return (0, address(0));
+        (fee,) = IFeeController(fc).quoteFee(payer, amount);
     }
 
     /// @notice Cancels a still-open request. Only the requester can cancel.
